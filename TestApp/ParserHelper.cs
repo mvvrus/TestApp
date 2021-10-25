@@ -26,18 +26,14 @@ namespace TestApp
         public static Parser<char, int> NumberParser { get; } = Digit.AtLeastOnce().Map(s => int.Parse(new string(s.ToArray())));
 
         public static Parser<char, (int begin, int? end)> IntervalParser { get; } =
-            from begin in NumberParser
-            from end in Char('-').Then(NumberParser).Optional()
-                .Map(MapMaybeStruct)
-            select (begin, end);
-
+            NumberParser.SelectMany(_ => Char('-').Then(NumberParser).Optional().Map(MapMaybeStruct), (begin, end) => (begin, end));
         public static Parser<char, ScheduleFormatEntry> WholeIntervalParser { get; } =
-            from interval in
-                Asterisk.Map(_ => (begin: default(int?), end: default(int?)))
-                    .Or(IntervalParser.Map(x => ((int?) x.begin, x.end)))
-            from step in Char('/').Then(NumberParser).Optional()
-                .Map(MapMaybeStruct)
-            select new ScheduleFormatEntry(interval.begin, interval.end, step);
+            Asterisk.Map(_ => (begin: default(int?), end: default(int?)))
+            .Or(IntervalParser.Map(x => ((int?)x.begin, x.end)))
+            .SelectMany(
+                _ => Char('/').Then(NumberParser).Optional().Map(MapMaybeStruct),
+                (interval, step) => new ScheduleFormatEntry(interval.begin, interval.end, step)
+            );
 
         public static Parser<char, ScheduleFormatEntry[]> IntervalsSequenceParser { get; } =
             Validate(WholeIntervalParser.SeparatedAndOptionallyTerminatedAtLeastOnce(Char(','))
@@ -45,12 +41,19 @@ namespace TestApp
                 GetWildcardsCheck());
 
         public static Parser<char, ScheduleDate> DateParser { get; } =
-            from years in Validate(IntervalsSequenceParser, GetBoundsCheck("Year", Constant.MinYear, Constant.MaxYear))
-            from _ in Char('.')
-            from months in Validate(IntervalsSequenceParser, GetBoundsCheck("Month", Constant.MinMonth, Constant.MaxMonth))
-            from __ in Char('.')
-            from days in Validate(IntervalsSequenceParser, GetBoundsCheck("Day", Constant.MinDay, Constant.MaxDay))
-            select new ScheduleDate(years, months, days);
+            Validate(IntervalsSequenceParser, GetBoundsCheck("Year", Constant.MinYear, Constant.MaxYear)).SelectMany(
+                _=>Char('.').SelectMany(
+                    _=> Validate(IntervalsSequenceParser, GetBoundsCheck("Month", Constant.MinMonth, Constant.MaxMonth)).SelectMany(
+                        _=>Char('.').SelectMany(
+                            _=>Validate(IntervalsSequenceParser, GetBoundsCheck("Day", Constant.MinDay, Constant.MaxDay)),
+                            (_,days)=>days
+                        ),
+                        (months,days)=>(days:days,months:months)
+                    ),
+                    (_,dm)=>dm
+                 ),
+                (years,dm)=>new ScheduleDate(years, dm.months, dm.days)
+            );
 
         public static Parser<char, ScheduleFormatEntry[]> DayOfWeekParser { get; } =
             Validate(IntervalsSequenceParser, GetBoundsCheck("Day of week", Constant.MinDayOfWeek, Constant.MaxDayOfWeek));
