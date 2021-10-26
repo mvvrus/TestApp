@@ -50,37 +50,47 @@ namespace TestApp
                         ),
                         (months,days)=>(days:days,months:months)
                     ),
-                    (_,dm)=>dm
+                    (_,md)=>md
                  ),
-                (years,dm)=>new ScheduleDate(years, dm.months, dm.days)
+                (years,md)=>new ScheduleDate(years, md.months, md.days)
             );
 
         public static Parser<char, ScheduleFormatEntry[]> DayOfWeekParser { get; } =
             Validate(IntervalsSequenceParser, GetBoundsCheck("Day of week", Constant.MinDayOfWeek, Constant.MaxDayOfWeek));
 
         public static Parser<char, ScheduleTime> TimeParser { get; } =
-            from hours in Validate(IntervalsSequenceParser, GetBoundsCheck("Hour", Constant.MinHour, Constant.MaxHour))
-            from _ in Char(':')
-            from min in Validate(IntervalsSequenceParser, GetBoundsCheck("Min", Constant.MinMinute, Constant.MaxMinute))
-            from __ in Char(':')
-            from sec in Validate(IntervalsSequenceParser, GetBoundsCheck("Sec", Constant.MinSec, Constant.MaxSec))
-            from millis in Char('.').Then(Validate(IntervalsSequenceParser, GetBoundsCheck("Millis", Constant.MinMillis, Constant.MaxMillis)))
-                .Optional()
-                .Map(MapMaybe)
-            select new ScheduleTime(hours, min, sec, millis ?? new[] {ScheduleFormatEntry.SinglePoint(0)});
+            Validate(IntervalsSequenceParser, GetBoundsCheck("Hour", Constant.MinHour, Constant.MaxHour)).SelectMany(
+                _ => Char(':').SelectMany(
+                    _ => Validate(IntervalsSequenceParser, GetBoundsCheck("Min", Constant.MinMinute, Constant.MaxMinute)).SelectMany(
+                        _=> Char(':').SelectMany(
+                            _=> Validate(IntervalsSequenceParser, GetBoundsCheck("Sec", Constant.MinSec, Constant.MaxSec)).SelectMany(
+                                _=> Char('.').Then(Validate(IntervalsSequenceParser, GetBoundsCheck("Millis", Constant.MinMillis, Constant.MaxMillis))).Optional().Map(MapMaybe),
+                                (sec, millis) => (sec: sec, millis: millis)
+                            ),  
+                            (_,sms)=>sms
+                        ),
+                        (min,sms)=>(min:min,sec:sms.sec,millis:sms.millis)
+                    ),
+                    (_,msms)=>msms
+                ),
+                (hours, msms) => new ScheduleTime(hours, msms.min, msms.sec, msms.millis ?? new[] { ScheduleFormatEntry.SinglePoint(0) })
+            );
 
         public static Parser<char, ScheduleFormat> FullFormatParser { get; } =
-            from date in Try(DateParser).Before(Char(' ')).Optional().Map(MapMaybe)
-            from dayOfWeek in Try(DayOfWeekParser.Before(Char(' '))).Optional().Map(MapMaybe)
-            from time in TimeParser
-            select new ScheduleFormat(
-                date ?? new ScheduleDate(
-                    new []{ScheduleFormatEntry.Always},
-                    new []{ScheduleFormatEntry.Always},
-                    new []{ScheduleFormatEntry.Always}
-                    ), 
-                dayOfWeek ?? new []{ScheduleFormatEntry.Always}, 
-                time);
+            Try(DateParser).Before(Char(' ')).Optional().Map(MapMaybe).SelectMany(
+                _=> Try(DayOfWeekParser.Before(Char(' '))).Optional().Map(MapMaybe).SelectMany(
+                    _=> TimeParser,(dayOfWeek,time)=> (dayOfWeek:dayOfWeek,time:time)
+                ),
+                (date,dowt)=> new ScheduleFormat(
+                    date ?? new ScheduleDate(
+                        new[] { ScheduleFormatEntry.Always },
+                        new[] { ScheduleFormatEntry.Always },
+                        new[] { ScheduleFormatEntry.Always }
+                    ),
+                    dowt.dayOfWeek ?? new[] { ScheduleFormatEntry.Always },
+                    dowt.time
+                )
+            );
 
         private static Parser<char, ScheduleFormatEntry[]> Validate(Parser<char, ScheduleFormatEntry[]> parser,
             Func<ScheduleFormatEntry[], Parser<char, Unit>> check) =>
