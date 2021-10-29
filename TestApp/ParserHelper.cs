@@ -30,8 +30,8 @@ namespace TestApp
         public static Parser<char, ScheduleFormatEntry> WholeIntervalParser { get; } =
             Asterisk.Map(_ => (begin: default(int?), end: default(int?)))
             .Or(IntervalParser.Map(x => ((int?)x.begin, x.end)))
-            .SelectMany(
-                _ => Char('/').Then(NumberParser).Optional().Map(MapMaybeStruct),
+            .Then(
+                Char('/').Then(NumberParser).Optional().Map(MapMaybeStruct),
                 (interval, step) => new ScheduleFormatEntry(interval.begin, interval.end, step)
             );
 
@@ -41,11 +41,11 @@ namespace TestApp
                 GetWildcardsCheck());
 
         public static Parser<char, ScheduleDate> DateParser { get; } =
-            Validate(IntervalsSequenceParser, GetBoundsCheck("Year", Constant.MinYear, Constant.MaxYear)).SelectMany(
-                _=>Char('.').SelectMany(
-                    _=> Validate(IntervalsSequenceParser, GetBoundsCheck("Month", Constant.MinMonth, Constant.MaxMonth)).SelectMany(
-                        _=>Char('.').SelectMany(
-                            _=>Validate(IntervalsSequenceParser, GetBoundsCheck("Day", Constant.MinDay, Constant.MaxDay)),
+            Validate(IntervalsSequenceParser, GetBoundsCheck("Year", Constant.MinYear, Constant.MaxYear)).Then(
+                Char('.').Then(
+                    Validate(IntervalsSequenceParser, GetBoundsCheck("Month", Constant.MinMonth, Constant.MaxMonth)).Then(
+                        Char('.').Then(
+                            Validate(IntervalsSequenceParser, GetBoundsCheck("Day", Constant.MinDay, Constant.MaxDay)),
                             (_,days)=>days
                         ),
                         (months,days)=>(days:days,months:months)
@@ -59,12 +59,12 @@ namespace TestApp
             Validate(IntervalsSequenceParser, GetBoundsCheck("Day of week", Constant.MinDayOfWeek, Constant.MaxDayOfWeek));
 
         public static Parser<char, ScheduleTime> TimeParser { get; } =
-            Validate(IntervalsSequenceParser, GetBoundsCheck("Hour", Constant.MinHour, Constant.MaxHour)).SelectMany(
-                _ => Char(':').SelectMany(
-                    _ => Validate(IntervalsSequenceParser, GetBoundsCheck("Min", Constant.MinMinute, Constant.MaxMinute)).SelectMany(
-                        _=> Char(':').SelectMany(
-                            _=> Validate(IntervalsSequenceParser, GetBoundsCheck("Sec", Constant.MinSec, Constant.MaxSec)).SelectMany(
-                                _=> Char('.').Then(Validate(IntervalsSequenceParser, GetBoundsCheck("Millis", Constant.MinMillis, Constant.MaxMillis))).Optional().Map(MapMaybe),
+            Validate(IntervalsSequenceParser, GetBoundsCheck("Hour", Constant.MinHour, Constant.MaxHour)).Then(
+                Char(':').Then(
+                    Validate(IntervalsSequenceParser, GetBoundsCheck("Min", Constant.MinMinute, Constant.MaxMinute)).Then(
+                        Char(':').Then(
+                            Validate(IntervalsSequenceParser, GetBoundsCheck("Sec", Constant.MinSec, Constant.MaxSec)).Then(
+                                Char('.').Then(Validate(IntervalsSequenceParser, GetBoundsCheck("Millis", Constant.MinMillis, Constant.MaxMillis))).Optional().Map(MapMaybe),
                                 (sec, millis) => (sec: sec, millis: millis)
                             ),  
                             (_,sms)=>sms
@@ -77,9 +77,9 @@ namespace TestApp
             );
 
         public static Parser<char, ScheduleFormat> FullFormatParser { get; } =
-            Try(DateParser).Before(Char(' ')).Optional().Map(MapMaybe).SelectMany(
-                _=> Try(DayOfWeekParser.Before(Char(' '))).Optional().Map(MapMaybe).SelectMany(
-                    _=> TimeParser,(dayOfWeek,time)=> (dayOfWeek:dayOfWeek,time:time)
+            Try(DateParser).Before(Char(' ')).Optional().Map(MapMaybe).Then(
+                Try(DayOfWeekParser.Before(Char(' '))).Optional().Map(MapMaybe).Then(
+                    TimeParser,(dayOfWeek,time)=> (dayOfWeek:dayOfWeek,time:time)
                 ),
                 (date,dowt)=> new ScheduleFormat(
                     date ?? new ScheduleDate(
