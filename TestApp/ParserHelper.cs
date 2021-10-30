@@ -22,66 +22,66 @@ namespace TestApp
     ///     fff - миллисекунды (0-999). Если не указаны, то 0
     public static class ParserHelper
     {
-        public static Parser<char, Unit> Asterisk { get; } = Char('*').Map(_ => Unit.Value);
-        public static Parser<char, int> NumberParser { get; } = Digit.AtLeastOnce().Map(s => int.Parse(new string(s.ToArray())));
+        public static Parser<char, char> Asterisk { get; } = Char('*');
+        public static Parser<char, int> NumberParser { get; } = UnsignedInt(10);
 
         public static Parser<char, (int begin, int? end)> IntervalParser { get; } =
-            NumberParser.SelectMany(_ => Char('-').Then(NumberParser).Optional().Map(MapMaybeStruct), (begin, end) => (begin, end));
+            NumberParser.SelectMany(_ => Char('-').Then(NumberParser).Nullable(), (begin, end) => (begin, end));
         public static Parser<char, ScheduleFormatEntry> WholeIntervalParser { get; } =
             Asterisk.Map(_ => (begin: default(int?), end: default(int?)))
             .Or(IntervalParser.Map(x => ((int?)x.begin, x.end)))
             .Then(
-                Char('/').Then(NumberParser).Optional().Map(MapMaybeStruct),
+                Char('/').Then(NumberParser).Nullable(),
                 (interval, step) => new ScheduleFormatEntry(interval.begin, interval.end, step)
             );
 
         public static Parser<char, ScheduleFormatEntry[]> IntervalsSequenceParser { get; } =
-            Validate(WholeIntervalParser.SeparatedAndOptionallyTerminatedAtLeastOnce(Char(','))
-                    .Map(x => x.ToArray()),
-                GetWildcardsCheck());
+            WholeIntervalParser.SeparatedAndOptionallyTerminatedAtLeastOnce(Char(',')).Map(x => x.ToArray())
+                    .Assert(entries => !(entries.Length > 1 && entries.Any(x => x == ScheduleFormatEntry.Always)), $"Cannot have more than one wildcard entry in schedule")
+            ;
 
         public static Parser<char, ScheduleDate> DateParser { get; } =
-            Validate(IntervalsSequenceParser, GetBoundsCheck("Year", Constant.MinYear, Constant.MaxYear)).Then(
+            IntervalsSequenceParser.AssertBounds("Year", Constant.MinYear, Constant.MaxYear).Then(
                 Char('.').Then(
-                    Validate(IntervalsSequenceParser, GetBoundsCheck("Month", Constant.MinMonth, Constant.MaxMonth)).Then(
+                    IntervalsSequenceParser.AssertBounds("Month", Constant.MinMonth, Constant.MaxMonth).Then(
                         Char('.').Then(
-                            Validate(IntervalsSequenceParser, GetBoundsCheck("Day", Constant.MinDay, Constant.MaxDay)),
-                            (_,days)=>days
+                            IntervalsSequenceParser. AssertBounds("Day", Constant.MinDay, Constant.MaxDay),
+                            (_, days) => days
                         ),
-                        (months,days)=>(days:days,months:months)
+                        (months, days) => (days: days, months: months)
                     ),
-                    (_,md)=>md
+                    (_, md) => md
                  ),
-                (years,md)=>new ScheduleDate(years, md.months, md.days)
+                (years, md) => new ScheduleDate(years, md.months, md.days)
             );
 
         public static Parser<char, ScheduleFormatEntry[]> DayOfWeekParser { get; } =
-            Validate(IntervalsSequenceParser, GetBoundsCheck("Day of week", Constant.MinDayOfWeek, Constant.MaxDayOfWeek));
+            IntervalsSequenceParser.AssertBounds("Day of week", Constant.MinDayOfWeek, Constant.MaxDayOfWeek);
 
         public static Parser<char, ScheduleTime> TimeParser { get; } =
-            Validate(IntervalsSequenceParser, GetBoundsCheck("Hour", Constant.MinHour, Constant.MaxHour)).Then(
+            IntervalsSequenceParser.AssertBounds("Hour", Constant.MinHour, Constant.MaxHour).Then(
                 Char(':').Then(
-                    Validate(IntervalsSequenceParser, GetBoundsCheck("Min", Constant.MinMinute, Constant.MaxMinute)).Then(
+                    IntervalsSequenceParser.AssertBounds("Min", Constant.MinMinute, Constant.MaxMinute).Then(
                         Char(':').Then(
-                            Validate(IntervalsSequenceParser, GetBoundsCheck("Sec", Constant.MinSec, Constant.MaxSec)).Then(
-                                Char('.').Then(Validate(IntervalsSequenceParser, GetBoundsCheck("Millis", Constant.MinMillis, Constant.MaxMillis))).Optional().Map(MapMaybe),
+                            IntervalsSequenceParser.AssertBounds("Sec", Constant.MinSec, Constant.MaxSec).Then(
+                                Char('.').Then(IntervalsSequenceParser.AssertBounds("Millis", Constant.MinMillis, Constant.MaxMillis)).Nullable(),
                                 (sec, millis) => (sec: sec, millis: millis)
-                            ),  
-                            (_,sms)=>sms
+                            ),
+                            (_, sms) => sms
                         ),
-                        (min,sms)=>(min:min,sec:sms.sec,millis:sms.millis)
+                        (min, sms) => (min: min, sec: sms.sec, millis: sms.millis)
                     ),
-                    (_,msms)=>msms
+                    (_, msms) => msms
                 ),
                 (hours, msms) => new ScheduleTime(hours, msms.min, msms.sec, msms.millis ?? new[] { ScheduleFormatEntry.SinglePoint(0) })
             );
 
         public static Parser<char, ScheduleFormat> FullFormatParser { get; } =
-            Try(DateParser).Before(Char(' ')).Optional().Map(MapMaybe).Then(
-                Try(DayOfWeekParser.Before(Char(' '))).Optional().Map(MapMaybe).Then(
-                    TimeParser,(dayOfWeek,time)=> (dayOfWeek:dayOfWeek,time:time)
+            Try(DateParser).Before(Char(' ')).Nullable().Then(
+                Try(DayOfWeekParser.Before(Char(' '))).Nullable().Then(
+                    TimeParser, (dayOfWeek, time) => (dayOfWeek: dayOfWeek, time: time)
                 ),
-                (date,dowt)=> new ScheduleFormat(
+                (date, dowt) => new ScheduleFormat(
                     date ?? new ScheduleDate(
                         new[] { ScheduleFormatEntry.Always },
                         new[] { ScheduleFormatEntry.Always },
@@ -92,41 +92,19 @@ namespace TestApp
                 )
             );
 
-        private static Parser<char, ScheduleFormatEntry[]> Validate(Parser<char, ScheduleFormatEntry[]> parser,
-            Func<ScheduleFormatEntry[], Parser<char, Unit>> check) =>
-            parser.SelectMany(check, (entries, _) => entries);
+        public static Parser<char, ScheduleFormatEntry[]> AssertBounds(this Parser<char, ScheduleFormatEntry[]> parser, string formatPart, int min, int max) 
+        {
+            string msg = "";
+            ScheduleFormatEntry? t;
+            return parser.Assert(
+                entries=>(msg = ((t = entries.FirstOrDefault(x => x.Begin < min || x.Begin > max || x.End < x.Begin || x.End > max)) != default ?
+                    $"{formatPart} component ({t.Begin}, {t.End}) is out of bounds ({min}, {max}" : ""))== "", 
+                msg);
+        }
 
-        private static Func<ScheduleFormatEntry[], Parser<char, Unit>> GetWildcardsCheck() =>
-            entries =>
-            {
-                if (entries.Length > 1 && entries.Any(x => x == ScheduleFormatEntry.Always))
-                {
-                    return Parser<char>.Fail<Unit>(
-                        $"Cannot have more than one wildcard entry in schedule");
-                }
-                
-                return Parser<char>.Return(Unit.Value);
-            };
-        
-        private static Func<ScheduleFormatEntry[], Parser<char, Unit>> GetBoundsCheck(string formatPart, int min, int max) =>
-            entries =>
-            {
-                foreach (var x in entries)
-                {
-                    if (x.Begin < min || x.Begin > max || x.End < x.Begin || x.End > max)
-                    {
-                        return Parser<char>.Fail<Unit>(
-                            $"{formatPart} component ({x.Begin}, {x.End}) is out of bounds ({min}, {max})");
-                    }
-                }
-
-                return Parser<char>.Return(Unit.Value);
-            };
-
-        private static T? MapMaybe<T>(Maybe<T> maybe) where T : class =>
-            maybe.HasValue ? maybe.GetValueOrDefault() : null;
-        
-        private static T? MapMaybeStruct<T>(Maybe<T> maybe) where T : struct =>
-            maybe.HasValue ? maybe.GetValueOrDefault() : null;
+        public static Parser<TToken, T?> Nullable<TToken, T>(this Parser<TToken, T> parser) where T : struct
+            => parser.Map<T?>(t => t).Or(Parser<TToken>.Return(default(T?)));
+        public static Parser<TToken, T?> Nullable<TToken, T>(this Parser<TToken, T> parser, bool _ = true) where T : class
+            => parser.Map<T?>(t => t).Or(Parser<TToken>.Return(default(T?)));
     }
 }
