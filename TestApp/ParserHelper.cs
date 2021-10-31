@@ -41,55 +41,33 @@ namespace TestApp
             ;
 
         public static Parser<char, ScheduleDate> DateParser { get; } =
-            IntervalsSequenceParser.AssertBounds("Year", Constant.MinYear, Constant.MaxYear).Then(
-                Char('.').Then(
-                    IntervalsSequenceParser.AssertBounds("Month", Constant.MinMonth, Constant.MaxMonth).Then(
-                        Char('.').Then(
-                            IntervalsSequenceParser. AssertBounds("Day", Constant.MinDay, Constant.MaxDay),
-                            (_, days) => days
-                        ),
-                        (months, days) => (days: days, months: months)
-                    ),
-                    (_, md) => md
-                 ),
-                (years, md) => new ScheduleDate(years, md.months, md.days)
+            Map((years, months, days) => new ScheduleDate(years, months, days),
+                IntervalsSequenceParser.AssertBounds("Year", Constant.MinYear, Constant.MaxYear).Before(Char('.')),
+                IntervalsSequenceParser.AssertBounds("Month", Constant.MinMonth, Constant.MaxMonth).Before(Char('.')),
+                IntervalsSequenceParser. AssertBounds("Day", Constant.MinDay, Constant.MaxDay)
             );
 
         public static Parser<char, ScheduleFormatEntry[]> DayOfWeekParser { get; } =
             IntervalsSequenceParser.AssertBounds("Day of week", Constant.MinDayOfWeek, Constant.MaxDayOfWeek);
 
         public static Parser<char, ScheduleTime> TimeParser { get; } =
-            IntervalsSequenceParser.AssertBounds("Hour", Constant.MinHour, Constant.MaxHour).Then(
-                Char(':').Then(
-                    IntervalsSequenceParser.AssertBounds("Min", Constant.MinMinute, Constant.MaxMinute).Then(
-                        Char(':').Then(
-                            IntervalsSequenceParser.AssertBounds("Sec", Constant.MinSec, Constant.MaxSec).Then(
-                                Char('.').Then(IntervalsSequenceParser.AssertBounds("Millis", Constant.MinMillis, Constant.MaxMillis)).Nullable(),
-                                (sec, millis) => (sec: sec, millis: millis)
-                            ),
-                            (_, sms) => sms
-                        ),
-                        (min, sms) => (min: min, sec: sms.sec, millis: sms.millis)
-                    ),
-                    (_, msms) => msms
-                ),
-                (hours, msms) => new ScheduleTime(hours, msms.min, msms.sec, msms.millis ?? new[] { ScheduleFormatEntry.SinglePoint(0) })
+            Map((hours, min, sec, millis) => new ScheduleTime(hours, min, sec, millis ?? new[] { ScheduleFormatEntry.SinglePoint(0) }),
+                IntervalsSequenceParser.AssertBounds("Hour", Constant.MinHour, Constant.MaxHour).Before(Char(':')),
+                IntervalsSequenceParser.AssertBounds("Min", Constant.MinMinute, Constant.MaxMinute).Before(Char(':')),
+                IntervalsSequenceParser.AssertBounds("Sec", Constant.MinSec, Constant.MaxSec),
+                Char('.').Then(IntervalsSequenceParser.AssertBounds("Millis", Constant.MinMillis, Constant.MaxMillis)).Nullable()
             );
 
         public static Parser<char, ScheduleFormat> FullFormatParser { get; } =
-            Try(DateParser).Before(Char(' ')).Nullable().Then(
-                Try(DayOfWeekParser.Before(Char(' '))).Nullable().Then(
-                    TimeParser, (dayOfWeek, time) => (dayOfWeek: dayOfWeek, time: time)
+            Map(
+                (date, dayOfWeek, time) => new ScheduleFormat(
+                    date ?? new ScheduleDate(new[] { ScheduleFormatEntry.Always }, new[] { ScheduleFormatEntry.Always }, new[] { ScheduleFormatEntry.Always }),
+                    dayOfWeek ?? new[] { ScheduleFormatEntry.Always },
+                    time
                 ),
-                (date, dowt) => new ScheduleFormat(
-                    date ?? new ScheduleDate(
-                        new[] { ScheduleFormatEntry.Always },
-                        new[] { ScheduleFormatEntry.Always },
-                        new[] { ScheduleFormatEntry.Always }
-                    ),
-                    dowt.dayOfWeek ?? new[] { ScheduleFormatEntry.Always },
-                    dowt.time
-                )
+                Try(DateParser).Before(Char(' ')).Nullable(),
+                Try(DayOfWeekParser.Before(Char(' '))).Nullable(),
+                TimeParser
             );
 
         public static Parser<char, ScheduleFormatEntry[]> AssertBounds(this Parser<char, ScheduleFormatEntry[]> parser, string formatPart, int min, int max) 
